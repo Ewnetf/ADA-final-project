@@ -1,0 +1,566 @@
+---
+title: "Trust in Doctors and Perceived Value of Multi-Cancer Early Detection (MCED) Testing: An Analysis of the 2024 Health Information National Trends Survey (HINTS 7)"
+author: "Ewnet Azerefegne"
+date: "December 3, 2025"
+output: 
+  bookdown::html_document2:
+    toc: true
+    number_sections: false
+editor_options: 
+  markdown: 
+    wrap: 72
+bibliography: references.bib
+---
+```{r}
+knitr::opts_chunk$set(
+echo = TRUE,
+message = FALSE,
+warning = FALSE
+)
+```
+## Introduction
+
+Multi-cancer early detection (MCED) blood tests are an emerging
+screening technology that aim to detect multiple cancers at an earlier,
+more treatable stage. However, public perceptions of these tests—and
+whether people view them as valuable—may depend on how much they trust
+their doctors and the broader health care system.
+
+In this analysis, we use data from the 2024 Health Information National
+Trends Survey (HINTS 7) to examine:
+
+Whether higher trust in doctors is associated with perceiving MCED
+tests as highly valuable.
+
+Whether this relationship is affected by respondents’ awareness of
+MCED tests.
+
+How this association changes after adjusting for demographic and
+health-related factors.
+## Methods
+```{r}
+pacman::p_load(officer,flextable,
+dplyr, readr, forcats,
+gridExtra, knitr, kableExtra,
+mosaic, table1, broom,
+survey, car, ResourceSelection
+)
+
+# Load HINTS 7 public-use data
+
+load("hints7_public.rda")
+ls()
+names(public)[1:20]
+
+```
+### Variable Selection
+We selected variables related to trust in doctors, perceived value of
+MCED tests, awareness of MCED tests, and relevant covariates.
+
+```{r}
+mced_dat <- public %>%
+dplyr::select(
+# Main variables
+CancerTrustDoctor,   # trust in doctor
+ValueMultiCaTest,    # perceived value of MCED
+HeardMultiCaTest,    # MCED awareness (mediator)
+
+# Covariates
+Age,
+BirthSex,
+RaceEthn5,
+EducA,
+HHInc,
+HealthInsurance2,
+ConfidentMedForms,
+TrustHCSystem,
+
+# Survey design / weights
+PERSON_FINWT0,
+VAR_STRATUM,
+VAR_CLUSTER
+
+)
+
+str(mced_dat$Age)
+
+```
+### Recoding and Data Management
+We recoded variables to create meaningful categories for analysis.
+```{r}
+mced_recoded <- mced_dat %>%
+mutate(
+## --- MAIN VARIABLES ---
+
+# DV: Perceived value of MCED (1 = Very valuable, 0 = all other responses)
+val_high = case_when(
+  ValueMultiCaTest == "Very valuable" ~ 1L,
+  ValueMultiCaTest %in% c("Somewhat valuable",
+                          "A little valuable",
+                          "Not at all valuable") ~ 0L,
+  TRUE ~ NA_integer_
+),
+
+# IV: Trust in doctors (1 = A lot, 0 = some/a little/not at all)
+trust_high = case_when(
+  CancerTrustDoctor == "A lot" ~ 1L,
+  CancerTrustDoctor %in% c("Some",
+                           "A little",
+                           "Not at all") ~ 0L,
+  TRUE ~ NA_integer_
+),
+
+# Mediator: awareness of MCED (1 = Yes, 0 = No / DK / Refused)
+aware = case_when(
+  HeardMultiCaTest == "Yes" ~ 1L,
+  HeardMultiCaTest %in% c("No",
+                          "Don't know",
+                          "Refused") ~ 0L,
+  TRUE ~ NA_integer_
+),
+
+## --- COVARIATES ---
+
+# Sex at birth
+Sex = case_when(
+  BirthSex == "Female" ~ 1L,
+  BirthSex == "Male"   ~ 2L,
+  TRUE ~ NA_integer_
+),
+
+age_num = suppressWarnings(as.numeric(as.character(Age))),
+
+# Age categories
+age_cat = case_when(
+  age_num >= 18 & age_num <= 49 ~ "18-49",
+  age_num >= 50 & age_num <= 64 ~ "50-64",
+  age_num >= 65                 ~ "65+",
+  TRUE ~ NA_character_
+),
+
+# Race/ethnicity
+race_cat = case_when(
+  RaceEthn5 == "Non-Hispanic White"                     ~ "White",
+  RaceEthn5 == "Non-Hispanic Black or African American" ~ "Black",
+  RaceEthn5 == "Hispanic"                               ~ "Hispanic",
+  RaceEthn5 == "Non-Hispanic Asian"                     ~ "Asian",
+  RaceEthn5 == "Non-Hispanic Other"                     ~ "Other",
+  TRUE ~ NA_character_
+),
+
+# Education (≤HS, Some college, College+)
+education3 = case_when(
+  EducA %in% c("Less than High School",
+               "High School Graduate")   ~ "≤HS",
+  EducA == "Some College"               ~ "Some college",
+  EducA == "College Graduate or More"   ~ "College+",
+  TRUE ~ NA_character_
+),
+
+# Insurance (Insured vs Uninsured)
+insured = case_when(
+  HealthInsurance2 == "Yes" ~ "Insured",
+  HealthInsurance2 == "No"  ~ "Uninsured",
+  TRUE ~ NA_character_
+),
+
+# Health literacy: confidence with medical forms
+hl_high = case_when(
+  ConfidentMedForms %in% c("Very", "Somewhat")       ~ "High",
+  ConfidentMedForms %in% c("A little", "Not at all") ~ "Not high",
+  TRUE ~ NA_character_
+),
+
+# General trust in health system
+sys_trust_high = case_when(
+  TrustHCSystem == "A lot"                             ~ "High",
+  TrustHCSystem %in% c("Some", "A little", "Not at all") ~ "Not high",
+  TRUE ~ NA_character_
+),
+
+# Income (<$35k, 35–74.9k, ≥75k)
+income3 = case_when(
+  HHInc %in% c("Less than $20,000",
+               "$20,000 to < $35,000") ~ "<$35k",
+  HHInc %in% c("$35,000 to < $50,000",
+               "$50,000 to < $75,000") ~ "$35-74.9k",
+  HHInc %in% c("$75,000 to < $100,000",
+               "$100,000 or greater")  ~ "≥$75k",
+  TRUE ~ NA_character_
+),
+
+## Turn key covariates into factors
+Sex            = factor(Sex, levels = c(1, 2), labels = c("Female", "Male")),
+age_cat        = factor(age_cat,        levels = c("18-49", "50-64", "65+")),
+race_cat       = factor(race_cat),
+education3     = factor(education3,     levels = c("≤HS", "Some college", "College+")),
+insured        = factor(insured,        levels = c("Insured", "Uninsured")),
+hl_high        = factor(hl_high,        levels = c("High", "Not high")),
+sys_trust_high = factor(sys_trust_high, levels = c("High", "Not high")),
+income3        = factor(income3,        levels = c("<$35k", "$35-74.9k", "≥$75k"))
+
+) %>%
+dplyr::select(
+val_high, trust_high, aware,
+Sex,
+age_cat, race_cat, education3,
+insured, hl_high, sys_trust_high, income3,
+PERSON_FINWT0, VAR_STRATUM, VAR_CLUSTER
+)
+
+str(mced_recoded)
+```
+###Create Analytic Sample
+We excluded respondents with missing data on key variables.
+The sample size decreased from 7278 to 5880 after applying these criteria.
+```{r}
+mced_analysis <- mced_recoded %>%
+filter(
+!is.na(val_high),
+!is.na(trust_high),
+!is.na(aware),
+!is.na(Sex),
+!is.na(age_cat),
+!is.na(race_cat),
+!is.na(education3),
+!is.na(insured),
+!is.na(hl_high),
+!is.na(sys_trust_high),
+!is.na(income3),
+!is.na(PERSON_FINWT0),
+!is.na(VAR_STRATUM),
+!is.na(VAR_CLUSTER)
+)
+
+nrow(mced_analysis)
+
+```
+### Survey weights and design
+We applied survey weights to account for the complex sampling design of HINTS.
+```{r}
+mced_design <- svydesign(
+ids = ~VAR_CLUSTER, # cluster
+strata = ~VAR_STRATUM, # strata
+weights = ~PERSON_FINWT0, # <<<<<< THIS DOES THE ACTUAL WEIGHTING <<<<<<
+nest = TRUE,
+data = mced_analysis
+)
+
+mced_design
+```
+##Descriptive Statistics
+We generated weighted descriptive statistics for the analytic sample.
+```{r}
+table1(
+~ val_high + trust_high + aware +
+Sex + age_cat + race_cat + education3 +
+income3 + insured + hl_high + sys_trust_high,
+data    = mced_recoded,
+caption = "Overall characteristics of HINTS 7 respondents with MCED variables."
+)
+
+```
+# Figure1 Analytic Sample Flow
+```{r}
+library(DiagrammeR)
+
+grViz("
+digraph flowchart {
+  graph [rankdir = TB]
+
+  node [shape = box, style = filled, color = LightGray,
+        fontname = Helvetica, fontsize = 12]
+  edge [fontname = Helvetica, fontsize = 11]
+
+  A [label = 'HINTS 7 public-use data\n(N = 7,278)']
+  B [label = 'Analytic sample with complete\nMCED variables\n(N = 5,880)']
+
+  A -> B [label = 'Excluded: 1,398 with missing\nMCED variables (~19.2%)']
+}
+")
+
+
+```
+
+```{r}
+# Create labeled factors for trust + outcomes
+mced_analysis <- mced_analysis %>%
+  mutate(
+    trust_high_factor = factor(
+      trust_high,
+      levels = c(0, 1),
+      labels = c("Less than a lot of trust", "A lot of trust")
+    ),
+    aware_factor = factor(
+      aware,
+      levels = c(0, 1),
+      labels = c("Not aware of MCED test", "Aware of MCED test")
+    ),
+    val_high_factor = factor(
+      val_high,
+      levels = c(0, 1),
+      labels = c("Does not see MCED as very valuable",
+                 "Perceives MCED as very valuable")
+    )
+  )
+
+# Add labels for table1
+label(mced_analysis$trust_high_factor) <- "Trust in doctor"
+label(mced_analysis$Sex)               <- "Sex at birth"
+label(mced_analysis$age_cat)           <- "Age group (years)"
+label(mced_analysis$race_cat)          <- "Race/ethnicity"
+label(mced_analysis$education3)        <- "Education"
+label(mced_analysis$income3)           <- "Household income"
+label(mced_analysis$insured)           <- "Health insurance"
+label(mced_analysis$hl_high)           <- "Health literacy (medical forms)"
+label(mced_analysis$sys_trust_high)    <- "Trust in health care system"
+label(mced_analysis$aware_factor)      <- "Awareness of MCED test"
+label(mced_analysis$val_high_factor)   <- "Perceives MCED as very valuable"
+
+# Table 1 by trust in doctor
+table1(
+  ~ Sex + age_cat + race_cat + education3 +
+    income3 + insured + hl_high + sys_trust_high +
+    aware_factor + val_high_factor | trust_high_factor,
+  data    = mced_analysis,
+  overall = "Total",
+  caption = "Characteristics of HINTS 7 respondents by level of trust in doctors."
+)
+
+```
+```{r}
+#discriptive graphs
+library(ggplot2)
+ggplot(mced_analysis, aes(x=as.factor(trust_high), fill=as.factor(val_high))) +
+  geom_bar(position="fill") +
+  scale_x_discrete(labels=c("0"="Less than a lot of trust", "1"="A lot of trust")) +
+  scale_fill_discrete(name="Perceived MCED Value", labels=c("0"="Does not see MCED as very valuable", "1"="Perceives MCED as very valuable")) +
+  labs(x="Trust in Doctor", y="Proportion", title="Proportion of Perceived MCED Value by Trust in Doctor") +
+  theme_minimal()
+```
+```{r}
+#DIstribution of awareness by trust ICLUDING DATA LABELS
+ggplot(mced_analysis, aes(x=as.factor(trust_high), fill=as.factor(aware))) +
+  geom_bar(position="fill") +
+  scale_x_discrete(labels=c("0"="Less than a lot of trust", "1"="A lot of trust")) +
+  scale_fill_discrete(name="Awareness of MCED Test", labels=c("0"="Not aware of MCED test", "1"="Aware of MCED test")) +
+  labs(x="Trust in Doctor", y="Proportion", title="Proportion of Awareness of MCED Test by Trust in Doctor") +
+  theme_minimal()
+```
+
+
+
+## Conceptual Model
+The conceptual model guiding this analysis is illustrated below.
+It posits that trust in doctors influences the perceived value of MCED tests,
+potentially mediated by awareness of these tests, while accounting for various
+demographic and health-related covariates.
+```{r}
+
+knitr::include_graphics("MCED_dag.png")
+
+```
+![](MCED_dag.png)
+
+
+## Regression Analysis
+```{r}
+## Regression Analysis
+
+
+
+make_or_table <- function(model) {
+summ    <- summary(model)
+coefmat <- summ$coefficients
+ci      <- suppressMessages(confint(model))
+
+data.frame(
+term     = rownames(coefmat),
+OR       = exp(coefmat[, "Estimate"]),
+CI_lower = exp(ci[, 1]),
+CI_upper = exp(ci[, 2]),
+p_value  = coefmat[, ncol(coefmat)]
+)
+}
+
+
+```
+### Model 1: Unadjusted (Trust Only, Survey-Weighted)
+```{r}
+model1_svy <- svyglm(
+val_high ~ trust_high,
+design = mced_design,
+family = quasibinomial()
+)
+
+or_m1 <- make_or_table(model1_svy)
+
+kable(
+or_m1,
+digits   = 3,
+caption  = "Survey-weighted unadjusted odds ratio for perceiving MCED as very valuable (trust only).",
+col.names = c("Term", "OR", "Lower 95% CI", "Upper 95% CI", "p-value")
+) %>%
+kable_styling(full_width = FALSE)
+
+
+
+```
+
+
+Interpretation (Model 1):
+In unadjusted analyses, participants who reported a high level of trust in their doctor had 1.19 times higher odds of perceiving MCED tests as very valuable compared with those reporting less than high trust in their doctor (OR = 1.44, 95% CI: 1.18–1.75, p = 0.0004).
+### Model 2: Adding MCED Awareness (Survey-Weighted)
+```{r}
+model2_svy <- svyglm(
+val_high ~ trust_high + aware,
+design = mced_design,
+family = quasibinomial()
+)
+
+or_m2 <- make_or_table(model2_svy)
+
+kable(
+or_m2,
+digits   = 3,
+caption  = "Survey-weighted odds ratios for perceived MCED value: trust and awareness.",
+col.names = c("Term", "OR", "Lower 95% CI", "Upper 95% CI", "p-value")
+) %>%
+kable_styling(full_width = FALSE)
+
+
+
+```
+Interpretation (Model 2):
+After adjusting for awareness of MCED tests, the association between trust in doctors and perceived value of MCED tests remained significant, with those reporting high trust having 1.35 times higher odds of perceiving MCED tests as very valuable (OR = 1.35, 95% CI: 1.10–1.66, p = 0.0042). Additionally, awareness of MCED tests was strongly associated with perceived value (OR = 2.50, 95% CI: 2.10–2.98, p < 0.001).
+### Model 3: Fully Adjusted Model (Survey-Weighted)
+```{r}
+model3_svy <- svyglm(
+val_high ~ trust_high + aware +
+Sex + age_cat + race_cat + education3 +
+insured + hl_high + sys_trust_high + income3,
+design = mced_design,
+family = quasibinomial()
+)
+
+or_m3 <- make_or_table(model3_svy)
+
+kable(
+or_m3,
+digits   = 3,
+caption  = "Fully adjusted survey-weighted odds ratios for perceived MCED value.",
+col.names = c("Term", "OR", "Lower 95% CI", "Upper 95% CI", "p-value")
+) %>%
+kable_styling(full_width = FALSE)
+
+```
+
+In the fully adjusted, survey-weighted logistic regression model, high trust in one’s doctor remained significantly associated with perceived MCED value. Adults reporting a lot of trust in their doctor had 1.36 times higher odds of perceiving MCED tests as highly valuable compared with those reporting lower trust (OR = 1.36, 95% CI: 1.08–1.70). MCED awareness was not associated with perceived value (OR = 0.92, 95% CI: 0.71–1.19). Men had lower odds of perceiving MCED tests as highly valuable than women (OR = 0.78, 95% CI: 0.63–0.97), and adults aged 50–64 had higher odds than those aged 18–49 (OR = 1.50, 95% CI: 1.20–1.87), whereas the association among those 65 and older was not statistically significant. Race/ethnicity, education, insurance status, system trust, and household income were not significantly associated with perceived MCED value in the weighted model. However, respondents with lower health literacy had notably lower odds of perceiving MCED tests as highly valuable than those with high health literacy (OR = 0.66, 95% CI: 0.50–0.86).
+
+
+##interaction test
+#Effect modification by age group
+```{r}
+# Interaction model: trust_high * age_cat
+
+mod_int_age <- svyglm(
+val_high ~ trust_high * age_cat + Sex + race_cat + education3 +
+insured + hl_high + sys_trust_high + income3 + aware,
+design = mced_design,
+family = quasibinomial()
+)
+
+# Wald test for interaction (trust_high × age_cat)
+
+regTermTest(mod_int_age, ~ trust_high:age_cat)
+
+
+```
+
+
+##Effect Modification by Age Group
+There was evidence of effect modification by age group (p = 0.012). This indicates that the association between trust in doctors and perceived MCED value varies across age categories.
+### Model Diagnostics(UNWEIGHTED MODEL)
+We assessed model diagnostics using the unweighted fully adjusted logistic regression model.
+```{r}
+# Unweighted logistic regression for diagnostics
+
+glm_unweighted <- glm(
+val_high ~ trust_high + aware +
+Sex + age_cat + race_cat + education3 +
+insured + hl_high + sys_trust_high + income3,
+data   = mced_analysis,
+family = binomial()
+)
+
+summary(glm_unweighted)
+
+```
+
+## Multicollinearity (VIF)
+```{r}
+car::vif(glm_unweighted)
+
+```
+No multicollinearity was detected, as all variance inflation factors (VIFs) were below 5.
+
+##Hosmer–Lemeshow
+```{r}
+ResourceSelection::hoslem.test(glm_unweighted$y, fitted(glm_unweighted), g=10)
+
+```
+
+The model fit was adequate based on a nonsignificant Hosmer–Lemeshow test (p = 0.67).
+
+##Influential points
+
+```{r}
+plot(glm_unweighted, which=4, id.n=10)
+
+
+
+```
+
+No influential points were detected based on Cook's distance.
+```{r results='asis', message=FALSE, warning=FALSE}
+library(tibble)
+library(knitr)
+library(kableExtra)
+
+reg_table <- tribble(
+  ~`Trust in doctors`,
+  ~`Overall\nUnadjusted OR (95% CI)`,
+  ~`Overall\nAdjustedᵃ OR (95% CI)`,
+  ~`Age 18–49\nUnadjusted OR (95% CI)`,
+  ~`Age 18–49\nAdjustedᵇ OR (95% CI)`,
+  ~`Age 50–64\nUnadjusted OR (95% CI)`,
+  ~`Age 50–64\nAdjustedᵇ OR (95% CI)`,
+  ~`Age 65+\nUnadjusted OR (95% CI)`,
+  ~`Age 65+\nAdjustedᵇ OR (95% CI)`,
+
+  "Less than \"a lot\"",
+  "1.0 (ref.)", "1.0 (ref.)",
+  "1.0 (ref.)", "1.0 (ref.)",
+  "1.0 (ref.)", "1.0 (ref.)",
+  "1.0 (ref.)", "1.0 (ref.)",
+
+  "\"A lot\" (trust_high = 1)",
+  "1.44 (1.18–1.75)", "1.36 (1.08–1.70)",
+  "1.16 (0.84–1.62)", "1.13 (0.79–1.62)",
+  "2.29 (1.64–3.21)", "2.18 (1.54–3.09)",
+  "1.34 (0.94–1.90)", "1.17 (0.79–1.73)"
+)
+
+kable(
+  reg_table,
+  caption = "Odds ratios for perceiving MCED as very valuable by trust in doctors, overall and by age group.",
+  align   = "lcccccccc"
+) %>%
+  kable_styling(full_width = FALSE)
+```
+
+```
+
+##End of Analysis
+
+
