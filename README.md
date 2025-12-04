@@ -93,7 +93,7 @@ Modeling approach:
 Diagnostics and sensitivity:
 
 * For diagnostics, an unweighted glm (binomial) mirroring the covariates in Model 3 is fit.
-* Multicollinearity: assessed with car::vif; consider VIF threshold (e.g., < 5 acceptable).
+* Multicollinearity: assessed with car::vif; consider VIF threshold .
 * Calibration: Hosmer–Lemeshow test via ResourceSelection::hoslem.test (on unweighted model).
 * Influence: Cook's distance plots (identify and consider observations with high Cook's D).
 
@@ -104,17 +104,17 @@ Table and figure generation:
 * Figures: ggplot2 bar charts (proportions) for perceived value and awareness by trust category.
 * Flow diagram: DiagrammeR to illustrate sample inclusion/exclusion.
 
-Notes / assumptions / caveats:
+Notes/assumptions/caveats:
 
-* Binary coding choices (e.g., treating "Somewhat valuable" as not "Very valuable")
-  affect interpretation; ensure these choices match research question and sensitivity analyses.
+* Binary coding choices (treating "Somewhat valuable" as not "Very valuable")
+  affect interpretation; ensure these choices match the research question and sensitivity analyses.
 * Awareness coded with "Don't know" and "Refused" grouped with "No" — consider alternate codings.
 * Survey-weighted inference depends on correct use of weights, clusters, and strata; verify
   that PERSON_FINWT0 is the appropriate final person-level weight for the target estimates.
 * Quasibinomial family is used with svyglm to address potential overdispersion in binary model;
   check whether results differ with binomial family or alternative variance estimators.
 * The Hosmer–Lemeshow test and Cook's distance are applied to the unweighted model for diagnostics;
-  weighted diagnostic alternatives are more complex—interpret diagnostics accordingly.
+  Weighted diagnostic alternatives are more complex—interpret diagnostics accordingly.
 * Interaction test p-values and subgroup estimates should be interpreted with attention to
   multiple comparisons and sample size within strata.
 
@@ -130,9 +130,9 @@ Suggested extensions and sensitivity checks:
 Execution notes:
 
 * Set working directory to the project/report folder containing the Rmd and required files.
-* Ensure pacman or listed packages are installed prior to knitting.
-* Output is intended for an HTML bookdown document (table of contents enabled).
+* Ensure pacman or listed packages are installed before knitting.
+* Output is intended for an HTML bookdown document.
 
 End of documentation.
-
+ This documentation file was created by GitHub Copilot 
 
